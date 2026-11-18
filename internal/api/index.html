@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dockyard — Docker &amp; Container Console</title>
+  <style>
+    :root { --bg:#0d1117; --card:#161b22; --border:#30363d; --fg:#e6edf3; --muted:#8b949e; --accent:#2f81f7; --danger:#da3633; --ok:#238636; }
+    body { margin:0; font-family: system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+    .topbar { display:flex; justify-content:space-between; align-items:center; padding:14px 22px; border-bottom:1px solid var(--border); background:var(--card); }
+    .container { max-width:1220px; margin:20px auto; padding:0 18px; }
+    .tabs { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px; }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:16px; margin-bottom:16px; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px; margin-bottom:16px; }
+    input, select, button { padding:7px 11px; border-radius:6px; border:1px solid var(--border); background:#21262d; color:var(--fg); font-size:0.9rem; }
+    button { background:var(--accent); border:none; cursor:pointer; font-weight:600; }
+    button.ghost { background:#21262d; border:1px solid var(--border); }
+    button.danger { background:var(--danger); }
+    button.sm { padding:4px 8px; font-size:0.78rem; }
+    table { width:100%; border-collapse:collapse; font-size:0.88rem; }
+    th, td { text-align:left; padding:9px 8px; border-bottom:1px solid var(--border); }
+    .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:0.75rem; font-weight:700; background:#30363d; }
+    .st-running { background:#14532d; color:#bbf7d0; }
+    .st-exited { background:#7f1d1d; color:#fecaca; }
+    pre { background:#0d1117; border:1px solid var(--border); border-radius:6px; padding:12px; max-height:320px; overflow:auto; font-size:0.82rem; }
+    svg { width:100%; height:90px; background:#0d1117; border:1px solid var(--border); border-radius:6px; }
+    .hidden { display:none !important; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <strong>Dockyard</strong>
+    <div id="user-bar" class="hidden">
+      <span id="whoami" style="margin-right:10px;color:var(--muted);"></span>
+      <button class="ghost sm" onclick="logout()">Sign Out</button>
+    </div>
+  </div>
+  <div class="container">
+    <div id="auth-box" class="card" style="max-width:440px;margin:60px auto;">
+      <h2 style="margin-top:0;">Sign In to Dockyard</h2>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <input id="auth-u" placeholder="Username (3-32 chars)" />
+        <input id="auth-p" type="password" placeholder="Password (min 8 chars)" />
+        <div style="display:flex;gap:8px;">
+          <button onclick="doAuth('/api/auth/login')">Sign In</button>
+          <button class="ghost" onclick="doAuth('/api/auth/register')">Register First Admin / User</button>
+        </div>
+        <div id="auth-err" style="color:#f85149;font-size:0.85rem;"></div>
+      </div>
+    </div>
+
+    <div id="app" class="hidden">
+      <div class="tabs">
+        <button class="ghost" onclick="showTab('containers')">Containers</button>
+        <button class="ghost" onclick="showTab('images')">Images</button>
+        <button class="ghost" onclick="showTab('networks')">Networks</button>
+        <button class="ghost" onclick="showTab('volumes')">Volumes</button>
+        <button class="ghost" onclick="showTab('stacks')">Compose Stacks</button>
+        <button class="ghost" onclick="showTab('audit')">Audit Log</button>
+        <button class="ghost" onclick="refreshAll()">Refresh</button>
+      </div>
+
+      <div id="sys-cards" class="grid"></div>
+
+      <div id="tab-containers" class="tab card">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+          <input id="c-name" placeholder="Container name" />
+          <input id="c-image" placeholder="Image (e.g. nginx:alpine)" />
+          <input id="c-port" placeholder="Host:Container port (e.g. 8080:80)" />
+          <button onclick="createContainer()">Create &amp; Start</button>
+        </div>
+        <table>
+          <thead><tr><th>Name</th><th>Image</th><th>State</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody id="containers-body"></tbody>
+        </table>
+        <div id="inspect-box" class="hidden" style="margin-top:16px;">
+          <h3 id="inspect-title">Container Telemetry &amp; Logs</h3>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px;">
+            <div><small>CPU % History</small><svg id="cpu-svg" viewBox="0 0 300 80"></svg></div>
+            <div><small>Memory % History</small><svg id="mem-svg" viewBox="0 0 300 80"></svg></div>
+          </div>
+          <pre id="logs-pre"></pre>
+        </div>
+      </div>
+
+      <div id="tab-images" class="tab card hidden">
+        <div style="display:flex;gap:8px;margin-bottom:12px;">
+          <input id="pull-ref" placeholder="Image reference (e.g. alpine:3.20)" />
+          <button onclick="pullImage()">Pull Image</button>
+          <span id="img-summary" style="color:var(--muted);align-self:center;margin-left:auto;"></span>
+        </div>
+        <table><thead><tr><th>Tags</th><th>ID</th><th>Size</th><th>Actions</th></tr></thead><tbody id="images-body"></tbody></table>
+      </div>
+
+      <div id="tab-networks" class="tab card hidden">
+        <div style="display:flex;gap:8px;margin-bottom:12px;">
+          <input id="net-name" placeholder="Network name" />
+          <select id="net-driver"><option value="bridge">bridge</option><option value="overlay">overlay</option></select>
+          <button onclick="createNetwork()">Create Network</button>
+        </div>
+        <table><thead><tr><th>Name</th><th>Driver</th><th>Scope</th><th>Containers</th><th>Actions</th></tr></thead><tbody id="networks-body"></tbody></table>
+      </div>
+
+      <div id="tab-volumes" class="tab card hidden">
+        <div style="display:flex;gap:8px;margin-bottom:12px;">
+          <input id="vol-name" placeholder="Volume name" />
+          <button onclick="createVolume()">Create Volume</button>
+        </div>
+        <table><thead><tr><th>Name</th><th>Driver</th><th>Mountpoint</th><th>Actions</th></tr></thead><tbody id="volumes-body"></tbody></table>
+      </div>
+
+      <div id="tab-stacks" class="tab card hidden">
+        <table><thead><tr><th>Compose Project</th><th>Running / Total</th><th>Healthy</th><th>Working Dir</th><th>Actions</th></tr></thead><tbody id="stacks-body"></tbody></table>
+      </div>
+
+      <div id="tab-audit" class="tab card hidden">
+        <table><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Target</th><th>Status</th><th>Details</th></tr></thead><tbody id="audit-body"></tbody></table>
+      </div>
+    </div>
+  </div>
+  <script>
+    let token = localStorage.getItem('dy_token') || '';
+    let activeCID = '';
+    function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
+    async function api(url, opts = {}) {
+      const headers = { ...(opts.headers || {}) };
+      if (token) headers.Authorization = 'Bearer ' + token;
+      const r = await fetch(url, { ...opts, headers });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || 'Request failed');
+      return data;
+    }
+    async function doAuth(ep) {
+      try {
+        const res = await api(ep, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: document.getElementById('auth-u').value, password: document.getElementById('auth-p').value })
+        });
+        token = res.token; localStorage.setItem('dy_token', token);
+        document.getElementById('whoami').textContent = `${res.user.username} (${res.user.role})`;
+        document.getElementById('auth-box').classList.add('hidden');
+        document.getElementById('app').classList.remove('hidden');
+        document.getElementById('user-bar').classList.remove('hidden');
+        await refreshAll();
+      } catch (e) { document.getElementById('auth-err').textContent = e.message; }
+    }
+    function logout() { token = ''; localStorage.removeItem('dy_token'); location.reload(); }
+    function showTab(name) {
+      document.querySelectorAll('.tab').forEach(el => el.classList.add('hidden'));
+      document.getElementById('tab-' + name).classList.remove('hidden');
+    }
+    function spark(list, key, color) {
+      if (!list || !list.length) return '';
+      const pts = list.map((m, i) => {
+        const x = list.length === 1 ? 300 : (i / (list.length - 1)) * 300;
+        const y = 75 - (Math.min(100, Math.max(0, m[key])) / 100) * 65;
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      }).join(' ');
+      return `<polyline fill="none" stroke="${color}" stroke-width="2" points="${pts}" />`;
+    }
+    async function refreshAll() {
+      try {
+        const sys = await api('/api/system/info');
+        document.getElementById('sys-cards').innerHTML = `
+          <div class="card"><small>Engine</small><div><strong>Docker ${esc(sys.ServerVersion)}</strong></div></div>
+          <div class="card"><small>Containers</small><div><strong>${sys.ContainersRunning} running / ${sys.Containers} total</strong></div></div>
+          <div class="card"><small>Images</small><div><strong>${sys.Images}</strong></div></div>
+          <div class="card"><small>Host Resources</small><div><strong>${sys.NCPU} CPUs • ${(sys.MemTotal/(1024**3)).toFixed(1)} GiB</strong></div></div>
+        `;
+      } catch (e) {
+        document.getElementById('sys-cards').innerHTML = `<div class="card">${esc(e.message)}</div>`;
+      }
+      const { containers } = await api('/api/containers?all=1').catch(() => ({ containers: [] }));
+      document.getElementById('containers-body').innerHTML = (containers || []).map(c => {
+        const nm = (c.Names && c.Names[0] || c.Id.slice(0,12)).replace(/^\//, '');
+        return `<tr>
+          <td><strong>${esc(nm)}</strong></td><td>${esc(c.Image)}</td>
+          <td><span class="pill st-${esc(c.State)}">${esc(c.State)}</span></td><td>${esc(c.Status)}</td>
+          <td style="display:flex;gap:5px;flex-wrap:wrap;">
+            <button class="ghost sm" onclick="cAction('${esc(c.Id)}','start')">Start</button>
+            <button class="ghost sm" onclick="cAction('${esc(c.Id)}','stop')">Stop</button>
+            <button class="ghost sm" onclick="cAction('${esc(c.Id)}','restart')">Restart</button>
+            <button class="ghost sm" onclick="inspectC('${esc(c.Id)}','${esc(nm)}')">Logs/Stats</button>
+            <button class="danger sm" onclick="delC('${esc(c.Id)}')">Del</button>
+          </td>
+        </tr>`;
+      }).join('');
+      const imgs = await api('/api/images').catch(() => ({ images: [], total_bytes: 0 }));
+      document.getElementById('img-summary').textContent = `Total: ${(imgs.total_bytes/(1024**2)).toFixed(1)} MiB (${imgs.dangling || 0} dangling)`;
+      document.getElementById('images-body').innerHTML = (imgs.images || []).map(i => `<tr>
+        <td>${esc((i.RepoTags||['<none>']).join(', '))}</td><td><code>${esc(i.Id.slice(0,19))}</code></td>
+        <td>${(i.Size/(1024**2)).toFixed(1)} MiB</td>
+        <td><button class="danger sm" onclick="delImg('${esc(i.Id)}')">Remove</button></td>
+      </tr>`).join('');
+      const nets = await api('/api/networks').catch(() => ({ networks: [] }));
+      document.getElementById('networks-body').innerHTML = (nets.networks || []).map(n => `<tr>
+        <td>${esc(n.Name)}</td><td>${esc(n.Driver)}</td><td>${esc(n.Scope)}</td>
+        <td>${Object.keys(n.Containers || {}).length}</td>
+        <td><button class="danger sm" onclick="delNet('${esc(n.Id)}')">Delete</button></td>
+      </tr>`).join('');
+      const vols = await api('/api/volumes').catch(() => ({ volumes: [] }));
+      document.getElementById('volumes-body').innerHTML = (vols.volumes || []).map(v => `<tr>
+        <td>${esc(v.Name)}</td><td>${esc(v.Driver)}</td><td><code>${esc(v.Mountpoint)}</code></td>
+        <td><button class="danger sm" onclick="delVol('${esc(v.Name)}')">Delete</button></td>
+      </tr>`).join('');
+      const stacks = await api('/api/stacks').catch(() => ({ stacks: [] }));
+      document.getElementById('stacks-body').innerHTML = (stacks.stacks || []).map(s => `<tr>
+        <td><strong>${esc(s.project)}</strong></td><td>${s.running} / ${s.total}</td><td>${s.healthy}</td><td><code>${esc(s.working_dir)}</code></td>
+        <td><button class="ghost sm" onclick="stackAction('${esc(s.project)}','restart')">Restart Stack</button> <button class="ghost sm" onclick="stackAction('${esc(s.project)}','stop')">Stop</button></td>
+      </tr>`).join('');
+      const audit = await api('/api/audit').catch(() => ({ audit: [] }));
+      document.getElementById('audit-body').innerHTML = (audit.audit || []).slice(0, 25).map(a => `<tr>
+        <td><small>${esc(a.created_at)}</small></td><td>${esc(a.actor)}</td><td>${esc(a.action)}</td>
+        <td><code>${esc(a.target)}</code></td><td>${esc(a.status)}</td><td>${esc(a.details)}</td>
+      </tr>`).join('');
+      if (activeCID) await inspectC(activeCID, activeCID.slice(0, 12));
+    }
+    async function cAction(id, act) { await api(`/api/containers/${encodeURIComponent(id)}/${act}`, { method:'POST' }); await refreshAll(); }
+    async function delC(id) { await api(`/api/containers/${encodeURIComponent(id)}?force=true`, { method:'DELETE' }); await refreshAll(); }
+    async function createContainer() {
+      const pm = document.getElementById('c-port').value.trim();
+      const ports = {};
+      if (pm.includes(':')) { const [h, c] = pm.split(':'); ports[h] = c; }
+      await api('/api/containers', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ name: document.getElementById('c-name').value.trim(), image: document.getElementById('c-image').value.trim(), ports, auto_start: true })
+      });
+      await refreshAll();
+    }
+    async function inspectC(id, nm) {
+      activeCID = id;
+      document.getElementById('inspect-box').classList.remove('hidden');
+      document.getElementById('inspect-title').textContent = `Container Telemetry & Logs: ${nm}`;
+      const st = await api(`/api/containers/${encodeURIComponent(id)}/stats`).catch(() => ({ history: [] }));
+      document.getElementById('cpu-svg').innerHTML = spark(st.history, 'cpu_percent', '#3b82f6');
+      document.getElementById('mem-svg').innerHTML = spark(st.history, 'mem_percent', '#22c55e');
+      const lg = await api(`/api/containers/${encodeURIComponent(id)}/logs?tail=100`).catch(() => ({ logs: '' }));
+      document.getElementById('logs-pre').textContent = lg.logs || '(no logs)';
+    }
+    async function pullImage() { await api('/api/images/pull', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ image: document.getElementById('pull-ref').value.trim() }) }); await refreshAll(); }
+    async function delImg(id) { await api(`/api/images/${encodeURIComponent(id)}?force=true`, { method:'DELETE' }); await refreshAll(); }
+    async function createNetwork() { await api('/api/networks', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name: document.getElementById('net-name').value.trim(), driver: document.getElementById('net-driver').value }) }); await refreshAll(); }
+    async function delNet(id) { await api(`/api/networks/${encodeURIComponent(id)}`, { method:'DELETE' }); await refreshAll(); }
+    async function createVolume() { await api('/api/volumes', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name: document.getElementById('vol-name').value.trim() }) }); await refreshAll(); }
+    async function delVol(nm) { await api(`/api/volumes/${encodeURIComponent(nm)}`, { method:'DELETE' }); await refreshAll(); }
+    async function stackAction(p, a) { await api(`/api/stacks/${encodeURIComponent(p)}/${a}`, { method:'POST' }); await refreshAll(); }
+  </script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+bin/
+/dockyard
+*.exe
+*.db
+*.db-wal
+*.db-shm
+.env
+data/
+coverage.out

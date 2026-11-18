@@ -1,0 +1,20 @@
+services:
+  dockyard:
+    build: .
+    container_name: dockyard
+    ports:
+      - "127.0.0.1:8091:8091"
+    environment:
+      DOCKYARD_ADDR: "0.0.0.0:8091"
+      DOCKYARD_DOCKER_HOST: "unix:///var/run/docker.sock"
+      DOCKYARD_DATA_DIR: "/data"
+      DOCKYARD_JWT_SECRET: "${DOCKYARD_JWT_SECRET:-change-me-in-production}"
+      DOCKYARD_ALLOW_SENSITIVE_MOUNTS: "false"
+    volumes:
+      - dockyard_data:/data
+      # Mount Docker socket carefully; never expose port 8091 unauthenticated to public networks
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+
+volumes:
+  dockyard_data:
